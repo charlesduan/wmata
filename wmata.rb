@@ -117,6 +117,38 @@ class Wmata
     }
   end
 
+  def bus_path_info(route)
+    @cache.get('bus_path', route, 3600) {
+      request('Bus.svc/json/jRouteDetails', 'RouteID' => route)
+    }
+  end
+
+  def bus_name(route)
+    bus_path_info(route)['Name']
+  end
+
+  def bus_direction(route, dirnum)
+    dir = (dirnum.to_s == '0') ? 'Direction0' : 'Direction1'
+    info = bus_path_info(route)[dir]
+    return [ info['DirectionText'], info['TripHeadsign'] ]
+  end
+
+  def bus_stops(route, dirnum)
+    dir = (dirnum.to_s == '0') ? 'Direction0' : 'Direction1'
+    info = bus_path_info(route)[dir]
+    info['Stops'].map { |x| [ x['StopID'], x['Name'] ] }
+  end
+
+  def bus_routes
+    res = {}
+    @cache.get('bus_routes', '', 86400) {
+      request('Bus.svc/json/jRoutes')
+    }['Routes'].each do |x| 
+      res[x['RouteID']] = x['Name']
+    end
+    return res
+  end
+
   class IncidentInfo
     def initialize(incident)
       @incident = incident

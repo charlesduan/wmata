@@ -108,6 +108,24 @@ class WmataRunner
     end
   end
 
+  def cmd_bus_name(route)
+    puts @wmata.bus_name(route)
+  end
+
+  def cmd_bus_info(route, dir)
+    puts @wmata.bus_direction(route, dir).join(" to ")
+    @wmata.bus_stops(route, dir).each do |id, name|
+      puts "  #{id}: #{name}"
+    end
+  end
+
+  def cmd_bus_routes
+    r = @wmata.bus_routes
+    r.keys.sort.each do |route|
+      puts "#{route} => #{r[route]}"
+    end
+  end
+
 end
 
 WmataRunner.new.run

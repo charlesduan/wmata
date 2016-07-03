@@ -138,6 +138,22 @@ class EM::Wmata
     end
   end
 
+  def bus_stop_name(station)
+    @cache.get('next_bus', station, 10, proc {
+      request('NextBusService.svc/json/jPredictions', 'StopID' => station)
+    }) do |data|
+      yield(data['StopName'])
+    end
+  end
+
+  def next_buses(station)
+    @cache.get('next_bus', station, 10, proc {
+      request('NextBusService.svc/json/jPredictions', 'StopID' => station)
+    }) do |data|
+      yield(data['Predictions'].map { |pred| BusPrediction.new(pred) })
+    end
+  end
+
   def rail_incidents
     @cache.get('rail_incidents', '', 20, proc {
       request('Incidents.svc/json/Incidents')
@@ -170,6 +186,28 @@ class EM::Wmata
     alias_method :eql?, :==
     def hash
       lines.hash & text.hash
+    end
+  end
+
+  class BusPrediction
+    def initialize(prediction)
+      @prediction = prediction
+    end
+
+    def group
+      @prediction['DirectionNum']
+    end
+    def direction
+      @prediction['DirectionText']
+    end
+    def min
+      @prediction['Minutes']
+    end
+    def line
+      @prediction['RouteID']
+    end
+    def <=>(other)
+      min <=> other.min
     end
   end
 
