@@ -5,35 +5,15 @@ require 'json'
 require 'date'
 require 'eventmachine'
 require 'em-http-request'
+require './em-cache'
 
 class EM::Wmata
-
-  class Cache
-    def initialize
-      @cache = {}
-    end
-
-    def get(type, key, valid, data_proc)
-      time = Time.now
-      entry = @cache[[type, key]]
-      if entry and entry[0] + valid > time
-        yield(entry[1])
-      else
-        deferrable = data_proc.call
-        deferrable.callback { |data|
-          @cache[[type, key]] = [ Time.now, data ]
-          yield(data)
-        }
-      end
-    end
-  end
-
 
   API_URL = URI.parse("https://api.wmata.com")
 
   def initialize(key)
     @api_key = key
-    @cache = Cache.new
+    @cache = EmCache.new
   end
 
   def request(endpoint, params = {})
@@ -41,7 +21,7 @@ class EM::Wmata
     request = EM::HttpRequest.new(uri).get(:query => params,
                                            :head => { 'api_key' => @api_key })
     res = EM::DefaultDeferrable.new
-    request.errback { res.fail }
+    request.errback { res.fail("Failed requesting #{uri.request_uri}") }
     request.callback do
       case request.response_header.http_status
       when 200
@@ -49,11 +29,13 @@ class EM::Wmata
       when 429
         maybe_retry(request, res) do
           new_res = request(endpoint, params)
-          new_res.errback { res.fail }
+          new_res.errback { res.fail("Failed second requesting #{uri.request_uri}") }
           new_res.callback { |*args| res.succeed(*args) }
         end
       else
-        res.fail
+        res.fail(
+          "Error requesting #{uri}: #{request.response_header.http_status}"
+        )
       end
     end
     return res
@@ -65,7 +47,7 @@ class EM::Wmata
       if delay < 5
         yield
       else
-        res.fail
+        res.fail("Too long retry delay: #{request.conn.uri}")
       end
     end
   end
@@ -86,6 +68,7 @@ class EM::Wmata
     lines do |the_lines|
       raise "Unknown line code #{line_code}" unless the_lines[line_code]
 
+      puts "Stations #{line_code}"
       @cache.get('stations', line_code, 86400, proc {
         request('Rail.svc/json/jStations', 'LineCode' => line_code)
       }) do |data|
@@ -135,6 +118,39 @@ class EM::Wmata
       }) do |data|
         yield(data['Trains'].map { |train| PredictionInfo.new(train) }.sort)
       end
+    end
+  end
+
+  def bus_path_info(route, &block)
+    @cache.get('bus_path', route, 3600, proc {
+      request('Bus.svc/json/jRouteDetails', 'RouteID' => route)
+    }, &block)
+  end
+
+  def bus_direction(route, dirnum)
+    dir = (dirnum.to_s == '0') ? 'Direction0' : 'Direction1'
+    bus_path_info(route) do |info|
+      yield([ info[dir]['DirectionText'], info[dir]['TripHeadsign'] ])
+    end
+  end
+
+  def bus_stops(route, dirnum)
+    dir = (dirnum.to_s == '0') ? 'Direction0' : 'Direction1'
+    bus_path_info(route) do |info|
+      info = info[dir]
+      yield(info['Stops'].map { |x| [ x['StopID'], x['Name'] ] })
+    end
+  end
+
+  def bus_routes
+    @cache.get('bus_routes', '', 86400, proc {
+      request('Bus.svc/json/jRoutes')
+    }) do |routes|
+      res = {}
+      routes['Routes'].each do |x|
+        res[x['RouteID']] = x['Name']
+      end
+      return res
     end
   end
 

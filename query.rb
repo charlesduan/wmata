@@ -1,10 +1,13 @@
 #!/usr/bin/ruby -w
 
-require './wmata.rb'
 require 'readline'
 require 'shellwords'
+require 'eventmachine'
+require './em-wmata.rb'
 
-class WmataRunner
+class WmataRunner < EM::Connection
+
+  include EM::Protocols::LineText2
 
   if RUBY_VERSION =~ /^1\./
     def self.commands
@@ -20,21 +23,25 @@ class WmataRunner
   attr_accessor :commands
 
   def initialize
-    @wmata = Wmata.new('838aefdf7f0047649fbea62ddcd0e32a')
+    @wmata = EM::Wmata.new('838aefdf7f0047649fbea62ddcd0e32a')
     @commands = self.class.commands
+    prompt
   end
 
-  def run
-    loop do
-      line = Readline.readline('wmata> ', true)
-      cmd, *args = line.shellsplit
-      next unless cmd
+  def prompt
+    print "wmata> "
+  end
 
+  def receive_line(line)
+    cmd, *args = line.shellsplit
+    if cmd
       begin
         dispatch(cmd, *args)
       rescue
         warn("#{$!.message}:\n#{$!.backtrace.join("\n")}")
       end
+    else
+      prompt
     end
   end
 
@@ -56,76 +63,102 @@ class WmataRunner
   def cmd_help
     puts "Available commands:"
     puts commands.sort.map { |x| "  #{x}" }.join("\n")
+    prompt
   end
 
   def cmd_quit
-    exit
+    EM.stop
   end
 
   def cmd_exit
-    exit
+    EM.stop
   end
 
   def cmd_lines
-    l = @wmata.lines
-    l.keys.sort.each do |code|
-      puts "#{code}: #{l[code]}"
+    @wmata.lines do |l|
+      l.keys.sort.each do |code|
+        puts "#{code}: #{l[code]}"
+      end
+      prompt
     end
   end
 
   def cmd_find(search)
-    s = @wmata.all_stations
-    s.keys.select { |x|
-      @wmata.station_name(x) =~ /#{search}/i
-    }.sort.each do |name|
-      puts "#{name}: #{@wmata.station_name(name)}"
+    @wmata.all_stations do |s|
+      s.keys.select { |x|
+        @wmata.station_name(x) =~ /#{search}/i
+      }.sort.each do |name|
+        puts "#{name}: #{@wmata.station_name(name)}"
+      end
+      prompt
     end
   end
 
   def cmd_station(code)
-    p @wmata.station_info(code)
+    @wmata.station_info(code) do |info|
+      p info
+      prompt
+    end
   end
 
   def cmd_next(*stations)
-    @wmata.next_trains(stations).each do |prediction|
-      if prediction.destination
-        destination = @wmata.station_name(prediction.destination)
-      else
-        destination = '(unknown destination)'
+    @wmata.next_trains(stations) do |predictions|
+      predictions.each do |prediction|
+        if prediction.destination
+          destination = @wmata.station_name(prediction.destination)
+        else
+          destination = '(unknown destination)'
+        end
+        printf("% 3s %2s Trk %1s   %s => %s\n", prediction.min, prediction.line,
+               prediction.group,
+               @wmata.station_name(prediction.location), destination)
       end
-      printf("% 3s %2s Trk %1s   %s => %s\n", prediction.min, prediction.line,
-             prediction.group,
-             @wmata.station_name(prediction.location), destination)
+      prompt
     end
   end
 
   def cmd_incidents
-    @wmata.rail_incidents.each do |incident|
-      puts "#{incident.lines.map { |x| @wmata.lines[x] }.join(", ")} " + \
-        "Line#{"s" if incident.lines.count > 1}:"
-      puts incident.text
-      puts ""
+    @wmata.rail_incidents do |incidents|
+      incidents.each do |incident|
+        puts "#{incident.lines.map { |x| @wmata.lines[x] }.join(", ")} " + \
+          "Line#{"s" if incident.lines.count > 1}:"
+        puts incident.text
+        puts ""
+      end
+      prompt
     end
   end
 
-  def cmd_bus_name(route)
-    puts @wmata.bus_name(route)
+  def cmd_bus_stop_name(station)
+    @wmata.bus_stop_name(station) do |name|
+      puts name
+      prompt
+    end
   end
 
   def cmd_bus_info(route, dir)
-    puts @wmata.bus_direction(route, dir).join(" to ")
-    @wmata.bus_stops(route, dir).each do |id, name|
-      puts "  #{id}: #{name}"
+    @wmata.bus_direction(route, dir) do |dirdata|
+      @wmata.bus_stops(route, dir) do |stopdata|
+        puts dirdata.join(" to ")
+        stopdata.each do |id, name|
+          puts "  #{id}: #{name}"
+        end
+        prompt
+      end
     end
   end
 
   def cmd_bus_routes
-    r = @wmata.bus_routes
-    r.keys.sort.each do |route|
-      puts "#{route} => #{r[route]}"
+    @wmata.bus_routes do |r|
+      r.keys.sort.each do |route|
+        puts "#{route} => #{r[route]}"
+      end
+      prompt
     end
   end
 
 end
 
-WmataRunner.new.run
+EM.run do
+  EM.open_keyboard(WmataRunner)
+end
