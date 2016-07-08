@@ -85,6 +85,11 @@ module WindowManager
     end
   end
 
+  def set_name(name)
+    @params[:name] = name
+    draw
+  end
+
   def draw_name(win, name)
     win.setpos(0, 0)
     win.attron(Curses::A_BOLD)
@@ -130,7 +135,7 @@ class Incidents
   def get_next
     if @messages.empty?
       @current_lines = []
-      @current = "*** No alerts ***" + " " * @msgwin.maxx
+      @current = " "
     else
       m = @messages.shift
       @messages.push(m)
@@ -205,10 +210,7 @@ class BusSet
 
   def draw
     @win.clear
-    @win.setpos(0, 0)
-    @win.attron(A_BOLD)
-    @win.addstr(@params[:name][0, @win.maxx])
-    @win.attroff(A_BOLD)
+    draw_name(@win, @params[:name] || "(Bus)")
 
     @predictions.each_with_index do |prediction, i|
       break if i >= @win.maxy - 1
@@ -270,7 +272,7 @@ class RailSet
 
   def draw
     @win.clear
-    draw_name(@win, @params[:name])
+    draw_name(@win, @params[:name] || "(Metro)")
 
     @predictions.each_with_index do |prediction, i|
       break if i >= @win.maxy - 1
@@ -423,27 +425,25 @@ class Controller
   end
 
   def add_bus_predictor(params)
-    if params[:name]
-      @predictors << BusSet.new(params)
-      allocate_predictors
-      update_predictors([ @predictors.last ])
-    else
+    predictor = BusSet.new(params)
+    @predictors << predictor
+    allocate_predictors
+    update_predictors([ predictor ])
+    unless params[:name]
       @wmata.bus_stop_name([ params[:location] ].flatten[0]) do |name|
-        params[:name] = name
-        add_bus_predictor(params)
+        predictor.set_name(name)
       end
     end
   end
 
   def add_rail_predictor(params)
-    if params[:name]
-      @predictors << RailSet.new(params)
-      allocate_predictors
-      update_predictors([ @predictors.last ])
-    else
+    predictor = RailSet.new(params)
+    @predictors << predictor
+    allocate_predictors
+    update_predictors([ predictor ])
+    unless params[:name]
       @wmata.station_name([ params[:location] ].flatten[0]) do |name|
-        params[:name] = name
-        add_rail_predictor(params)
+        predictor.set_name(name)
       end
     end
   end
@@ -506,8 +506,8 @@ begin
     @controller = Controller.new('838aefdf7f0047649fbea62ddcd0e32a')
     @controller.add_rail_predictor(:location => 'A03')
     @controller.add_rail_predictor(:location => 'A04')
-    @controller.add_bike_predictor(:station_ids => [ 51, 107, 214, 149, 135 ])
     @controller.add_bus_predictor(:location => %w(1001724 1001744) )
+    @controller.add_bike_predictor(:station_ids => [ 51, 107, 214, 149, 135 ])
 
     @controller.update_incidents_data
 
