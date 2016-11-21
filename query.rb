@@ -94,9 +94,9 @@ class WmataRunner < EM::Connection
   def cmd_find(search)
     @wmata.all_stations do |s|
       s.keys.select { |x|
-        @wmata.station_name(x) =~ /#{search}/i
+        s[x]['Name'] =~ /#{search}/i
       }.sort.each do |name|
-        puts "#{name}: #{@wmata.station_name(name)}"
+        puts "#{name}: #{s[name]['Name']}"
       end
       prompt
     end

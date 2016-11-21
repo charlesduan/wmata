@@ -18,7 +18,14 @@ module WindowManager
     'YL' => COLOR_YELLOW + 8,
     'GR' => COLOR_GREEN + 8,
     'OR' => COLOR_MAGENTA + 8,
-    'SV' => COLOR_WHITE + 8
+    'SV' => COLOR_WHITE + 8,
+    'North' => COLOR_CYAN + 8,
+    'East' => COLOR_YELLOW + 8,
+    'South' => COLOR_RED + 8,
+    'West' => COLOR_GREEN + 8,
+    'Many bikes' => COLOR_GREEN + 8,
+    'Few bikes' => COLOR_YELLOW + 8,
+    'No bikes' => COLOR_RED + 8
   }
 
   def self.better_colors
@@ -220,7 +227,15 @@ class BusSet
 
       @win.addstr(prediction.line.ljust(3) + "  ")
 
-      @win.addstr(prediction.direction[0, @allocation[4]])
+      dirtext = prediction.direction[0, @allocation[4]]
+      if dirtext =~ / /
+        first, dirtext = $`, $'
+        @win.attron(color_pair(color_for(first)))
+        @win.addstr(first)
+        @win.attroff(color_pair(color_for(first)))
+        @win.addstr(' ')
+      end
+      @win.addstr(dirtext)
     end
     @win.refresh
   end
@@ -357,7 +372,16 @@ class BikeSet
       data = @station_data[station_id]
       @win.setpos(i + 1, 0)
       if data[:status]
-        @win.addstr(data[:status].status_string(@allocation[0]) + "  ")
+        status = data[:status].status_string(@allocation[0])
+        if status =~ /\//
+          bikes, docks = $`, $'
+          draw_bikenum(bikes)
+          @win.addstr("/")
+          draw_bikenum(docks)
+        else
+          @win.addstr(status)
+        end
+        @win.addstr("  ")
       else
         @win.addstr(" " * (@allocation[0] + 2))
       end
@@ -365,6 +389,18 @@ class BikeSet
     end
     @win.refresh
   end
+
+  def draw_bikenum(text)
+    color = case text.to_i
+            when 0 then 'No bikes'
+            when 1..4 then 'Few bikes'
+            else 'Many bikes'
+            end
+    @win.attron(color_pair(color_for(color)))
+    @win.addstr(text)
+    @win.attroff(color_pair(color_for(color)))
+  end
+
 end
 
 class Controller
@@ -508,6 +544,11 @@ class KeyboardHandler < EventMachine::Connection
   def cmd_13
     system("./togglescreen.sh")
   end
+
+  def cmd_0
+    close_screen
+    exec $0
+  end
 end
 
 class Debugger
@@ -552,6 +593,8 @@ begin
                                    :min_time => 7)
     @controller.add_rail_predictor(0, :location => 'A04',
                                    :min_time => 7)
+    @controller.add_rail_predictor(0, :location => 'E03',
+                                   :min_time => 7)
     @controller.add_bus_predictor(1, :location => %w(1001724 1001744),
                                   :min_time => 4)
     @controller.add_bus_predictor(1, :location => %w(1001708 1001711),
@@ -594,6 +637,12 @@ begin
       end
     end
   end
+
+rescue Exception => e
+  Debugger.log("Trapped #{e.class}: #{e.message}")
+  Debugger.log(e.backtrace.join("\n"))
+  close_screen
+  exec $0
 
 ensure
   close_screen
