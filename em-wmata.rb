@@ -11,31 +11,39 @@ class EM::Wmata
 
   API_URL = URI.parse("https://api.wmata.com")
 
-  def initialize(key)
+  def initialize(key, &block)
     @api_key = key
-    @cache = EmCache.new
+    @cache = EmCache.new(&block)
   end
 
   def request(endpoint, params = {})
     uri = API_URL + endpoint
-    request = EM::HttpRequest.new(uri).get(:query => params,
-                                           :head => { 'api_key' => @api_key })
     res = EM::DefaultDeferrable.new
-    request.errback { res.fail("Failed requesting #{uri.request_uri}") }
-    request.callback do
-      case request.response_header.http_status
-      when 200
-        res.succeed(JSON.parse(request.response))
-      when 429
-        maybe_retry(request, res) do
-          new_res = request(endpoint, params)
-          new_res.errback { res.fail("Failed second requesting #{uri.request_uri}") }
-          new_res.callback { |*args| res.succeed(*args) }
+    @cache.resolve_dns(uri) do |ip|
+      request = EM::HttpRequest.new(uri, :host => ip).get(
+        :query => params,
+        :head => { 'api_key' => @api_key }
+      )
+      request.errback {
+        res.fail("Failed requesting #{uri.request_uri} with #{params.inspect}")
+      }
+      request.callback do
+        case request.response_header.http_status
+        when 200
+          res.succeed(JSON.parse(request.response))
+        when 429
+          maybe_retry(request, res) do
+            new_res = request(endpoint, params)
+            new_res.errback {
+              res.fail("Failed second requesting #{uri.request_uri}")
+            }
+            new_res.callback { |*args| res.succeed(*args) }
+          end
+        else
+          res.fail(
+            "Error requesting #{uri}: #{request.response_header.http_status}"
+          )
         end
-      else
-        res.fail(
-          "Error requesting #{uri}: #{request.response_header.http_status}"
-        )
       end
     end
     return res
@@ -150,7 +158,7 @@ class EM::Wmata
       routes['Routes'].each do |x|
         res[x['RouteID']] = x['Name']
       end
-      return res
+      yield res
     end
   end
 

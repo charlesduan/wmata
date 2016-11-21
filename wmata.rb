@@ -168,7 +168,6 @@ class Wmata
     end
 
     def ==(other)
-      puts "HERE"
       lines == other.lines && text == other.text
     end
     alias_method :eql?, :==

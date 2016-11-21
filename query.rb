@@ -4,6 +4,8 @@ require 'readline'
 require 'shellwords'
 require 'eventmachine'
 require './em-wmata.rb'
+require './em-cabi.rb'
+require './em-cache.rb'
 
 class WmataRunner < EM::Connection
 
@@ -23,7 +25,11 @@ class WmataRunner < EM::Connection
   attr_accessor :commands
 
   def initialize
-    @wmata = EM::Wmata.new('838aefdf7f0047649fbea62ddcd0e32a')
+    @wmata = EM::Wmata.new('838aefdf7f0047649fbea62ddcd0e32a') do |err|
+      puts err
+    end
+    @cabi = EM::CapitalBikeshare.new do |err| puts err end
+    @cache = EmCache.new do |err| puts err end
     @commands = self.class.commands
     prompt
   end
@@ -39,6 +45,7 @@ class WmataRunner < EM::Connection
         dispatch(cmd, *args)
       rescue
         warn("#{$!.message}:\n#{$!.backtrace.join("\n")}")
+        prompt
       end
     else
       prompt
@@ -52,6 +59,7 @@ class WmataRunner < EM::Connection
   def method_missing(name, *args)
     if name.to_s =~ /^cmd_/
       STDERR.puts("Command not found: #{name.to_s.sub(/^cmd_/, '')}")
+      prompt
     else
       super
     end
@@ -153,6 +161,20 @@ class WmataRunner < EM::Connection
       r.keys.sort.each do |route|
         puts "#{route} => #{r[route]}"
       end
+      prompt
+    end
+  end
+
+  def cmd_cabi_station(station_id)
+    @cabi.station_name(station_id) do |name|
+      puts "Bikeshare station #{station_id} => #{name}"
+      prompt
+    end
+  end
+
+  def cmd_dns(name)
+    @cache.resolve_dns(name) do |r|
+      p r
       prompt
     end
   end

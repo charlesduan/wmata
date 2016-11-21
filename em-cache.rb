@@ -1,14 +1,32 @@
 require 'eventmachine'
 
 class EmCache
-  def initialize
+  def initialize(&block)
     @cache = {}
     @count = 0
+    @errproc = block
+  end
+
+  def resolve_dns(uri, &block)
+    uri = URI.parse(uri) if uri.is_a?(String)
+    host = uri.host
+    get('DNS', host, 600, proc {
+      d = EM::DNS::Resolver.resolve(host)
+      res = EM::DefaultDeferrable.new
+      d.errback { res.fail("Failed resolving DNS of #{host} for #{uri}") }
+      d.callback { |r|
+        if r.is_a?(Array) and r.first
+          res.succeed(r.first)
+        else
+          res.fail("No DNS result for #{host} of #{uri}")
+        end
+      }
+      res
+    }, &block)
   end
 
   def get(type, key, valid, data_proc, &block)
     @count += 1
-    count = @count
     time = Time.now
     entry = @cache[[type, key]]
     if entry.is_a?(CachePending)
@@ -26,7 +44,7 @@ class EmCache
       }
       deferrable.errback { |msg|
         @cache[[type, key]] = nil
-        raise "Failed in cache: #{msg}"
+        @errproc.call("Failed in cache: #{msg}")
       }
     end
   end

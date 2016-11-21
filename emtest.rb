@@ -10,7 +10,7 @@ begin
 
   class KeyboardHandler < EventMachine::Connection
     def receive_data(data)
-      puts "Got `#{data}'"
+      puts "Got `#{data.ord}'"
       EventMachine.stop_event_loop if data == 'q'
     end
   end

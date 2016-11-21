@@ -9,22 +9,29 @@ require 'em-http-request'
 
 class EM::CapitalBikeshare
 
-  def initialize
-    @cache = EmCache.new
+  def initialize(&block)
+    @cache = EmCache.new(&block)
   end
 
   def request(uri)
-    request = EM::HttpRequest.new(URI.parse(uri)).get
+    uri = URI.parse(uri)
     res = EM::DefaultDeferrable.new
-    request.errback { res.fail("Error requesting #{uri}") }
-    request.callback do
-      case request.response_header.http_status
-      when 200
-        res.succeed(JSON.parse(request.response))
-      else
-        res.fail(
-          "Error requesting #{uri}: #{request.response_header.http_status}"
-        )
+    @cache.resolve_dns(uri) do |ip|
+      request = EM::HttpRequest.new(uri, :host => ip).get
+      request.errback { res.fail("Error requesting #{uri}") }
+      request.callback do
+        case request.response_header.http_status
+        when 200
+          begin
+            res.succeed(JSON.parse(request.response))
+          rescue
+            res.fail("Error processing #{uri} response")
+          end
+        else
+          res.fail(
+            "Error requesting #{uri}: #{request.response_header.http_status}"
+          )
+        end
       end
     end
     return res

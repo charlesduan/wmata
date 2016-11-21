@@ -174,18 +174,18 @@ class BusSet
 
   attr_accessor :params
 
-  def setup_window(height, ypos)
+  def setup_window(height, width, ypos, xpos)
     if @win
       @win.clear
       @win.refresh
-      @win.resize(height, cols)
-      @win.move(ypos, 0)
+      @win.resize(height, width)
+      @win.move(ypos, xpos)
       @win.refresh
     else
-      @win = Window.new(height, cols, ypos, 0)
+      @win = Window.new(height, width, ypos, xpos)
     end
     @allocation = allocate_space(
-      cols, [ [ 2, 3, 6 ], [ 2 ], [ 3 ], [ 2 ], 10..30 ]
+      width, [ [ 2, 3, 6 ], [ 2 ], [ 3 ], [ 2 ], 10..30 ]
     )
     @win.clear
     draw
@@ -198,7 +198,8 @@ class BusSet
   def update_data(predictions)
     @predictions += predictions.select { |x|
       (!@params[:line] || x.line == @params[:line]) &&
-        (!@params[:group] || x.group == @params[:group])
+        (!@params[:group] || x.group == @params[:group]) &&
+        (!@params[:min_time] || x.min >= @params[:min_time])
     }
     @predictions.sort!
     draw
@@ -231,9 +232,6 @@ class RailSet
   include WindowManager
 
   def initialize(params)
-    @allocation = allocate_space(
-      cols, [ [ 2, 3, 6 ], [ 2 ], [ 2 ], [ 2, 5 ], 10..30 ]
-    )
     @params = params
     @predictions = []
   end
@@ -244,18 +242,18 @@ class RailSet
     return params[:location]
   end
 
-  def setup_window(height, ypos)
+  def setup_window(height, width, ypos, xpos)
     if @win
       @win.clear
       @win.refresh
-      @win.resize(height, cols)
-      @win.move(ypos, 0)
+      @win.resize(height, width)
+      @win.move(ypos, xpos)
       @win.refresh
     else
-      @win = Window.new(height, cols, ypos, 0)
+      @win = Window.new(height, width, ypos, xpos)
     end
     @allocation = allocate_space(
-      cols, [ [ 2, 3, 6 ], [ 2 ], [ 2 ], [ 2, 5 ], 10..30 ]
+      width, [ [ 2, 3, 6 ], [ 2 ], [ 2 ], [ 2, 5 ], 10..30 ]
     )
     @win.clear
     draw
@@ -265,7 +263,8 @@ class RailSet
     @predictions = predictions.select { |x|
       x.location == @params[:location] &&
         (!@params[:line] || x.line == @params[:line]) &&
-        (!@params[:group] || x.group == @params[:group])
+        (!@params[:group] || x.group == @params[:group]) &&
+        (!@params[:min_time] || x.min.to_i >= @params[:min_time])
     }
     draw
   end
@@ -303,26 +302,32 @@ class BikeSet
   def initialize(params)
     @params = params
     @params[:name] ||= 'Capital Bikeshare'
-    @cabi = EM::CapitalBikeshare.new
+    @params[:aliases] ||= {}
+    @cabi = EM::CapitalBikeshare.new do |err| Debugger.log(err) end
     @station_ids = params[:station_ids]
     @station_data = Hash[@station_ids.map { |x| [ x, {} ] }]
     @station_ids.each do |station_id|
-      @cabi.station_name(station_id) do |name|
-        @station_data[station_id][:name] = name
-        draw
+      if @params[:aliases][station_id]
+        @station_data[station_id][:name] = params[:aliases][station_id]
+      else
+        @cabi.station_name(station_id) do |name|
+          @station_data[station_id][:name] = name
+          draw
+        end
       end
     end
+    draw
   end
-  def setup_window(height, ypos)
+  def setup_window(height, width, ypos, xpos)
     if @win
       @win.clear
       @win.refresh
-      @win.resize(height, cols)
-      @win.move(ypos, 0)
+      @win.resize(height, width)
+      @win.move(ypos, xpos)
     else
-      @win = Window.new(height, cols, ypos, 0)
+      @win = Window.new(height, width, ypos, xpos)
     end
-    @allocation = allocate_space(cols, [ [ 5, 9, 17 ], [ 2 ], 10..26 ])
+    @allocation = allocate_space(width, [ [ 5, 9, 17 ], [ 2 ], 10..26 ])
     draw
   end
 
@@ -345,6 +350,7 @@ class BikeSet
 
   def draw
     return unless @win
+    @win.clear
     draw_name(@win, @params[:name])
     @station_ids.each_with_index do |station_id, i|
       break if i >= @win.maxy - 1
@@ -364,10 +370,11 @@ end
 class Controller
   include WindowManager
 
-  def initialize(key)
-    @wmata = EM::Wmata.new(key)
+  def initialize(key, columns)
+    @wmata = EM::Wmata.new(key) do |err| Debugger.log(err) end
     @incidents = Incidents.new
     @predictors = []
+    columns.times { @predictors << [] }
   end
 
   def redraw
@@ -386,12 +393,12 @@ class Controller
   end
 
   def update_periodic
-    @predictors.each(&:update_periodic)
+    @predictors.flatten.each(&:update_periodic)
   end
 
   def update_predictors(predictors = @predictors)
     rails = []
-    predictors.each do |predictor|
+    predictors.flatten.each do |predictor|
       case predictor
       when BikeSet
         predictor.update_data
@@ -416,17 +423,23 @@ class Controller
   end
 
   def allocate_predictors
-    alloc = allocate_space(Curses.lines - 1, [ 2..7 ] * @predictors.count )
-    pos = 0
-    alloc.zip(@predictors).each do |lines, predictor|
-      predictor.setup_window([ lines - 1, 2 ].max, pos)
-      pos += lines
+    col_alloc = allocate_space(Curses.cols + 1, [ 20..80 ] * @predictors.count)
+    xpos = 0
+    col_alloc.zip(@predictors).each do |cols, col_predictors|
+      next if col_predictors.empty?
+      alloc = allocate_space(Curses.lines - 1, [ 2..9 ] * col_predictors.count )
+      ypos = 0
+      alloc.zip(col_predictors).each do |lines, predictor|
+        predictor.setup_window([ lines - 1, 2 ].max, cols - 1, ypos, xpos)
+        ypos += lines
+      end
+      xpos += cols
     end
   end
 
-  def add_bus_predictor(params)
+  def add_bus_predictor(column, params)
     predictor = BusSet.new(params)
-    @predictors << predictor
+    @predictors[column] << predictor
     allocate_predictors
     update_predictors([ predictor ])
     unless params[:name]
@@ -436,9 +449,9 @@ class Controller
     end
   end
 
-  def add_rail_predictor(params)
+  def add_rail_predictor(column, params)
     predictor = RailSet.new(params)
-    @predictors << predictor
+    @predictors[column] << predictor
     allocate_predictors
     update_predictors([ predictor ])
     unless params[:name]
@@ -448,8 +461,8 @@ class Controller
     end
   end
 
-  def add_bike_predictor(params)
-    @predictors << BikeSet.new(params)
+  def add_bike_predictor(column, params)
+    @predictors[column] << BikeSet.new(params)
     allocate_predictors
     update_predictors([ @predictors.last ])
   end
@@ -463,7 +476,11 @@ class KeyboardHandler < EventMachine::Connection
   end
 
   def receive_data(data)
-    send("cmd_#{data.downcase}")
+    if data =~ /^[a-zA-Z0-9]$/
+      send("cmd_#{data.downcase}")
+    else
+      send("cmd_#{data.ord}")
+    end
   end
 
   def method_missing(name, *args)
@@ -487,10 +504,35 @@ class KeyboardHandler < EventMachine::Connection
   def cmd_d
     @controller.redraw
   end
+
+  def cmd_13
+    system("./togglescreen.sh")
+  end
 end
 
+class Debugger
+  def self.log(message = nil)
+    @io = open('log.txt', 'a') unless @io
+    @prefix = '' unless @prefix
+    @io.puts(@prefix + message) if message
+    @io.flush
+    if block_given?
+      prevstack = caller(1, 1)[0]
+      @io.puts("#{@prefix}Entering #{prevstack}")
+      @prefix += " "
+      yield
+      @prefix = @prefix[0..-2]
+      @io.puts("#{@prefix}Leaving #{prevstack}")
+    end
+  end
+
+  def self.close
+    @io.close if @io
+  end
+end
 
 begin
+  io = open('log.txt', 'a')
   init_screen
   start_color
   crmode
@@ -503,11 +545,26 @@ begin
 
   EM.run do
 
-    @controller = Controller.new('838aefdf7f0047649fbea62ddcd0e32a')
-    @controller.add_rail_predictor(:location => 'A03')
-    @controller.add_rail_predictor(:location => 'A04')
-    @controller.add_bus_predictor(:location => %w(1001724 1001744) )
-    @controller.add_bike_predictor(:station_ids => [ 51, 107, 214, 149, 135 ])
+    Debugger.log("Starting")
+
+    @controller = Controller.new('838aefdf7f0047649fbea62ddcd0e32a', 2)
+    @controller.add_rail_predictor(0, :location => 'A03',
+                                   :min_time => 7)
+    @controller.add_rail_predictor(0, :location => 'A04',
+                                   :min_time => 7)
+    @controller.add_bus_predictor(1, :location => %w(1001724 1001744),
+                                  :min_time => 4)
+    @controller.add_bus_predictor(1, :location => %w(1001708 1001711),
+                                  :min_time => 4)
+    @controller.add_bike_predictor(
+      0,
+      :station_ids => [ 51, 107, 214, 149, 135 ],
+      :aliases => {
+        51 => "Dupont Circle", 107 => 'Dupont South',
+        214 => 'Marie Reed 18th St', 149 => 'Pleasant Pops',
+        135 => 'Belmont St'
+      }
+    )
 
     @controller.update_incidents_data
 
@@ -540,5 +597,7 @@ begin
 
 ensure
   close_screen
+  Debugger.log("Done")
+  Debugger.close
 end
 

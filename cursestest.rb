@@ -8,19 +8,24 @@ begin
   start_color
   init_pair(1, COLOR_RED + 8, COLOR_BLACK)
   init_pair(2, COLOR_WHITE + 16, COLOR_BLACK)
+  init_pair(3, COLOR_RED, COLOR_BLACK)
   crmode
   setpos(3, 3)
   attron(color_pair(0))
   addstr("Hello world!")
   attroff(color_pair(0))
+  setpos(4, 3)
+  attron(color_pair(3))
+  addstr("How are you?")
+  attroff(color_pair(4))
   setpos(5, 3)
   attron(color_pair(1))
   addstr("Dimensions are #{lines}x#{cols}.")
   attroff(color_pair(1))
   setpos(6, 3)
-  attron(color_pair(2))
+  #attron(color_pair(2))
   addstr("Colors: #{colors}")
-  attroff(color_pair(2))
+  #attroff(color_pair(2))
   refresh
   sleep(10)
 ensure
