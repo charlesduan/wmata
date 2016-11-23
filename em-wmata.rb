@@ -51,7 +51,7 @@ class EM::Wmata
 
   def maybe_retry(request, res)
     if request.response_header['Retry-After']
-      delay = response['Retry-After'].to_i
+      delay = request.response_header['Retry-After'].to_i
       if delay < 5
         yield
       else
