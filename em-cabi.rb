@@ -86,13 +86,15 @@ class EM::CapitalBikeshare
     end
 
     def status_string(width)
-      fmt = case width
-            when 5 then "%2d/%2d"
-            when 9 then "%2d b/%2d d"
-            when 17 then "%2d bikes/%2d docks"
+      b, d = num_bikes_available, num_docks_available
+      res = case width
+            when 5 then "%2d/%2d" % [ b, d ]
+            when 9 then "%2d b/%2d d" % [ b, d ]
+            when 17 then "%2d bike%s/%2d dock%s" % \
+              [ b, b == 1 ? ' ' : 's', d, d == 1 ? ' ' : 's' ]
             else raise "Invalid width"
             end
-      return fmt % [ num_bikes_available, num_docks_available ]
+      return res
     end
 
     def working

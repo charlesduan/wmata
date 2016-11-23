@@ -98,9 +98,10 @@ module WindowManager
   end
 
   def draw_name(win, name)
+    @count = @count ? @count + 1 : 0
     win.setpos(0, 0)
     win.attron(Curses::A_BOLD)
-    win.addstr(name[0, win.maxx])
+    win.addstr("#@count #{name}"[0, win.maxx])
     win.attroff(Curses::A_BOLD)
   end
 
@@ -209,7 +210,6 @@ class BusSet
         (!@params[:min_time] || x.min >= @params[:min_time])
     }
     @predictions.sort!
-    draw
   end
 
   def location
@@ -347,10 +347,12 @@ class BikeSet
   end
 
   def update_data
+    num_stations = @station_ids.count
     @station_ids.each do |station_id|
       @cabi.station_status(station_id) do |status|
         @station_data[station_id][:status] = status
-        draw
+        num_stations -= 1
+        draw if num_stations == 0
       end
     end
   end
@@ -434,19 +436,27 @@ class Controller
 
   def update_predictors(predictors = @predictors)
     rails = []
+    delay = 1
     predictors.flatten.each do |predictor|
       case predictor
       when BikeSet
-        predictor.update_data
+        EM.add_timer(delay / 2.0) { predictor.update_data }
+        delay += 1
       when RailSet
         rails.push(predictor)
       when BusSet
-        predictor.clear_data
-        predictor.location.each do |location|
-          @wmata.next_buses(location) do |predictions|
-            predictor.update_data(predictions)
+        EM.add_timer(delay / 2.0) {
+          num_left = predictor.location.count
+          predictor.clear_data
+          predictor.location.each do |location|
+            @wmata.next_buses(location) do |predictions|
+              predictor.update_data(predictions)
+              num_left -= 1
+              predictor.draw if num_left == 0
+            end
           end
-        end
+        }
+        delay += 1
       end
     end
     unless rails.empty?
@@ -621,7 +631,7 @@ begin
       @controller.update_periodic
     end
 
-    EM.add_periodic_timer(10) do
+    EM.add_periodic_timer(4) do
       @controller.update_predictors
     end
 
