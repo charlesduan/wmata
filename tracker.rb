@@ -98,10 +98,11 @@ module WindowManager
   end
 
   def draw_name(win, name)
-    @count = @count ? @count + 1 : 0
+    #@count = @count ? @count + 1 : 0
     win.setpos(0, 0)
     win.attron(Curses::A_BOLD)
-    win.addstr("#@count #{name}"[0, win.maxx])
+    #win.addstr("#@count #{name}"[0, win.maxx])
+    win.addstr(name[0, win.maxx])
     win.attroff(Curses::A_BOLD)
   end
 
